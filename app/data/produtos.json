@@ -1,0 +1,5 @@
+[
+  { "id": "1", "nome": "Crédito Pessoal Rápido", "taxaJurosAnual": 19.9, "prazoMaximoMeses": 24 },
+  { "id": "2", "nome": "Financiamento de Veículo", "taxaJurosAnual": 15.5, "prazoMaximoMeses": 60 },
+  { "id": "3", "nome": "Capital de Giro MEI", "taxaJurosAnual": 12.0, "prazoMaximoMeses": 36 }
+]
