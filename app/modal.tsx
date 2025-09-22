@@ -1,138 +1,135 @@
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, ScrollView } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { View, Text, StyleSheet, FlatList, SafeAreaView } from 'react-native';
+import { useLocalSearchParams, Stack } from 'expo-router';
 
-const mockResultado = {
-    dadosProduto: {
-        nome: 'Crédito Pessoal Rápido',
-    },
-    taxaJurosMensal: 1.53,
-    valorTotalComJuros: 6451.20,
-    valorParcela: 537.60,
-    memoriaCalculo: [
-        { mes: 1, juros: 76.50, amortizacao: 461.10, saldoDevedor: 4538.90 },
-        { mes: 2, juros: 69.45, amortizacao: 468.15, saldoDevedor: 4070.75 },
-        { mes: 3, juros: 62.28, amortizacao: 475.32, saldoDevedor: 3595.43 },
-        { mes: 12, juros: 8.10, amortizacao: 529.50, saldoDevedor: 0 },
-    ]
+// Cores do Design System
+const CAIXA_BLUE = '#005CA9';
+const CAIXA_ORANGE = '#F7A500';
+const BACKGROUND_COLOR = '#F4F7FC';
+const TEXT_COLOR = '#34495E';
+const WHITE = '#FFFFFF';
+
+// Helper para formatar moeda
+const formatCurrency = (value: number) => {
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 export default function ResultadoSimulacaoModal() {
-    const resultado = mockResultado;
+    const params = useLocalSearchParams();
+    // Recebe o resultado como string JSON e o converte de volta para um objeto
+    const resultado = params.resultado ? JSON.parse(params.resultado as string) : null;
+
+    if (!resultado) {
+        return (
+            <View style={styles.centered}>
+                <Text>Não foi possível carregar o resultado.</Text>
+            </View>
+        );
+    }
 
   return (
-    <ScrollView style={styles.container}>
-        <Text style={styles.headerTitle}>Resultado da Simulação</Text>
-        <Text style={styles.produtoNome}>{resultado.dadosProduto.nome}</Text>
-
-        <View style={styles.cardsContainer}>
-            <View style={styles.card}>
-                <Text style={styles.cardLabel}>Valor da Parcela</Text>
-                <Text style={styles.cardValue}>R$ {resultado.valorParcela.toFixed(2)}</Text>
+    <SafeAreaView style={styles.container}>
+      <Stack.Screen options={{ headerTitle: "Resultado da Simulação", headerStyle: {backgroundColor: CAIXA_BLUE}, headerTintColor: WHITE }} />
+      <FlatList
+        ListHeaderComponent={
+          <>
+            <Text style={styles.produtoNome}>{resultado.produtoNome}</Text>
+            <View style={styles.cardsContainer}>
+                <View style={[styles.card, {backgroundColor: CAIXA_BLUE}]}>
+                    <Text style={styles.cardLabelWhite}>Valor da Parcela</Text>
+                    <Text style={styles.cardValueWhite}>{formatCurrency(resultado.valorParcela)}</Text>
+                </View>
+                <View style={[styles.card, {backgroundColor: CAIXA_ORANGE}]}>
+                    <Text style={styles.cardLabelWhite}>Valor Total</Text>
+                    <Text style={styles.cardValueWhite}>{formatCurrency(resultado.valorTotalComJuros)}</Text>
+                </View>
             </View>
-            <View style={styles.card}>
-                <Text style={styles.cardLabel}>Total com Juros</Text>
-                <Text style={styles.cardValue}>R$ {resultado.valorTotalComJuros.toFixed(2)}</Text>
+            <Text style={styles.tableHeader}>Detalhes das Parcelas</Text>
+          </>
+        }
+        data={resultado.memoriaCalculo}
+        keyExtractor={(item) => item.mes.toString()}
+        renderItem={({ item, index }) => (
+            <View style={[styles.tableRow, index % 2 === 0 ? styles.tableRowEven : {}]}>
+                <Text style={[styles.tableCell, {fontWeight: 'bold'}]}>{item.mes}</Text>
+                <Text style={styles.tableCell}>{formatCurrency(item.juros)}</Text>
+                <Text style={styles.tableCell}>{formatCurrency(item.amortizacao)}</Text>
+                <Text style={styles.tableCell}>{formatCurrency(item.saldoDevedor)}</Text>
             </View>
-        </View>
-
-        <Text style={styles.tableHeader}>Memória de Cálculo</Text>
-        <View style={styles.table}>
-            <View style={styles.tableRowHeader}>
-                <Text style={styles.tableCellHeader}>Mês</Text>
-                <Text style={styles.tableCellHeader}>Juros</Text>
-                <Text style={styles.tableCellHeader}>Amortização</Text>
-                <Text style={styles.tableCellHeader}>Saldo</Text>
-            </View>
-            <FlatList
-                data={resultado.memoriaCalculo}
-                keyExtractor={(item) => item.mes.toString()}
-                renderItem={({ item }) => (
-                    <View style={styles.tableRow}>
-                        <Text style={styles.tableCell}>{item.mes}</Text>
-                        <Text style={styles.tableCell}>R$ {item.juros.toFixed(2)}</Text>
-                        <Text style={styles.tableCell}>R$ {item.amortizacao.toFixed(2)}</Text>
-                        <Text style={styles.tableCell}>R$ {item.saldoDevedor.toFixed(2)}</Text>
-                    </View>
-                )}
-            />
-        </View>
-    </ScrollView>
+        )}
+        ListHeaderComponentStyle={{paddingHorizontal: 20}}
+        ListFooterComponent={<View style={{height: 20}}/>} // Espaço no final
+        stickyHeaderIndices={[2]} // Faz o header da tabela ficar fixo (requer ajustes mais complexos para funcionar perfeitamente com FlatList Header)
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 20,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: WHITE,
     },
-    headerTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#005CA9',
-        textAlign: 'center',
-        marginBottom: 10,
+    centered: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     produtoNome: {
         fontSize: 18,
-        color: '#666666',
+        color: TEXT_COLOR,
         textAlign: 'center',
-        marginBottom: 20,
+        marginVertical: 20,
+        fontWeight: '500',
     },
     cardsContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginBottom: 20,
+        justifyContent: 'space-between',
+        marginBottom: 24,
     },
     card: {
-        backgroundColor: '#F0F0F7',
         borderRadius: 8,
-        padding: 15,
+        padding: 20,
         alignItems: 'center',
         width: '48%',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOpacity: 0.15,
+        shadowRadius: 5,
+        shadowOffset: {width: 0, height: 3},
     },
-    cardLabel: {
+    cardLabelWhite: {
         fontSize: 14,
-        color: '#666666',
+        color: 'rgba(255, 255, 255, 0.8)',
     },
-    cardValue: {
+    cardValueWhite: {
         fontSize: 18,
         fontWeight: 'bold',
-        color: '#005CA9',
+        color: WHITE,
         marginTop: 5,
     },
     tableHeader: {
         fontSize: 18,
         fontWeight: 'bold',
-        color: '#333333',
+        color: TEXT_COLOR,
         marginBottom: 10,
-    },
-    table: {
-        borderColor: '#DDD',
-        borderWidth: 1,
-        borderRadius: 8,
-    },
-    tableRowHeader: {
-        flexDirection: 'row',
-        backgroundColor: '#EFEFF4',
-        borderTopLeftRadius: 8,
-        borderTopRightRadius: 8,
+        paddingHorizontal: 20,
+        backgroundColor: WHITE,
     },
     tableRow: {
         flexDirection: 'row',
+        paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#EEE',
+        paddingHorizontal: 20,
     },
-    tableCellHeader: {
-        flex: 1,
-        padding: 10,
-        fontWeight: 'bold',
-        textAlign: 'center',
+    tableRowEven: {
+        backgroundColor: BACKGROUND_COLOR,
     },
     tableCell: {
         flex: 1,
-        padding: 10,
-        textAlign: 'center',
-    }
+        textAlign: 'right',
+        fontSize: 13,
+        color: TEXT_COLOR,
+    },
 });

@@ -1,7 +1,11 @@
-import produtosJson from '../data/produtos.json';
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { Link } from 'expo-router';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, SafeAreaView } from 'react-native';
+import { Link, useFocusEffect } from 'expo-router';
+
+// Cores do Design System
+const CAIXA_BLUE = '#005CA9';
+const BACKGROUND_COLOR = '#F4F7FC';
+const TEXT_COLOR = '#34495E';
 
 type Produto = {
   id: string;
@@ -10,65 +14,63 @@ type Produto = {
   prazoMaximoMeses: number;
 };
 
-const fetchProdutos = (): Promise<Produto[]> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(produtosJson);
-    }, 1500);
-  });
-};
+// ATENÇÃO: Troque 'localhost' pelo IP da sua máquina se for testar no celular físico
+// const API_URL = 'http://localhost:5000';
+const API_URL = 'http://192.168.0.2:5000';
 
-export default function TabOneScreen() {
+export default function ListaProdutosScreen() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const carregarDados = async () => {
-      try {
-        setLoading(true);
-        // linha abaixo pela sua chamada de API real
-        const dados = await fetchProdutos();
-        setProdutos(dados);
-      } catch (error) {
-        console.error("Erro ao buscar produtos:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchProdutos = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/produtos`);
+      const data = await response.json();
+      setProdutos(data);
+    } catch (error) {
+      console.error("Erro ao buscar produtos:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    carregarDados();
-  }, []); 
+  // useFocusEffect recarrega os dados toda vez que a tela recebe foco
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchProdutos();
+    }, [])
+  );
 
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text>Carregando produtos...</Text>
+        <ActivityIndicator size="large" color={CAIXA_BLUE} />
+        <Text style={styles.loadingText}>Carregando produtos...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <FlatList
         data={produtos}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-           // Trocar para consulta de API 
-          <Link
-            href={{ pathname: "/produto/[id]", params: { id: item.id } }}
-            asChild
-          >
+          <Link href={`/produto/${item.id}`} asChild>
             <TouchableOpacity style={styles.card}>
-              <Text style={styles.cardTitle}>{item.nome}</Text>
-              <Text style={styles.cardText}>Taxa: {item.taxaJurosAnual}% a.a.</Text>
-              <Text style={styles.cardText}>Prazo máximo: {item.prazoMaximoMeses} meses</Text>
+              <View style={styles.cardIndicator} />
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>{item.nome}</Text>
+                <Text style={styles.cardText}>Taxa de {item.taxaJurosAnual}% a.a.</Text>
+                <Text style={styles.cardText}>Até {item.prazoMaximoMeses} meses</Text>
+              </View>
             </TouchableOpacity>
           </Link>
         )}
         contentContainerStyle={{ padding: 16 }}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -77,29 +79,46 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: BACKGROUND_COLOR,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: TEXT_COLOR,
   },
   container: {
     flex: 1,
-    backgroundColor: '#F0F0F7',
+    backgroundColor: BACKGROUND_COLOR,
   },
   card: {
     backgroundColor: 'white',
-    padding: 20,
     borderRadius: 8,
     marginBottom: 16,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+  },
+  cardIndicator: {
+    width: 6,
+    backgroundColor: CAIXA_BLUE,
+  },
+  cardContent: {
+    padding: 20,
+    flex: 1,
   },
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 8,
+    color: CAIXA_BLUE,
   },
   cardText: {
     fontSize: 14,
-    color: '#666',
+    color: TEXT_COLOR,
+    lineHeight: 20,
   },
 });
