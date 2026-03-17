@@ -1,0 +1,201 @@
+name: Stale Branch Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: >
+          Comma-separated list of repos to audit (e.g. my-org/api,my-org/frontend).
+          Leave empty to use the default list defined in the workflow.
+        required: false
+        type: string
+
+  schedule:
+    - cron: "0 8 * * 1" # Every Monday at 8am UTC
+
+jobs:
+  audit:
+    name: Audit Stale Branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run audit and build JSON report
+        id: audit
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          REPOS_INPUT: ${{ github.event.inputs.repos }}
+        run: |
+          # ── Repo list ────────────────────────────────────────────────────────
+          DEFAULT_REPOS=(
+            "my-org/repo-one"
+            "my-org/repo-two"
+            "my-org/repo-three"
+          )
+
+          if [ -n "$REPOS_INPUT" ]; then
+            IFS=',' read -ra REPOS <<< "$REPOS_INPUT"
+          else
+            REPOS=("${DEFAULT_REPOS[@]}")
+          fi
+
+          # ── Main report array (will hold one object per repo) ────────────────
+          REPORT="[]"
+          TOTAL_STALE=0
+
+          for REPO in "${REPOS[@]}"; do
+            REPO=$(echo "$REPO" | xargs) # trim whitespace
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔍 Auditing: $REPO"
+
+            # Get default branch so we never flag it
+            DEFAULT_BRANCH=$(gh api "/repos/$REPO" --jq '.default_branch' 2>/dev/null)
+            if [ -z "$DEFAULT_BRANCH" ]; then
+              echo "  ⚠️  Could not reach $REPO — skipping (check token permissions)"
+              REPORT=$(echo "$REPORT" | jq \
+                --arg repo "$REPO" \
+                '. += [{"repo": $repo, "status": "error", "stale_branches": []}]')
+              continue
+            fi
+
+            # ── Paginate through all merged PRs ─────────────────────────────
+            PAGE=1
+            MERGED_BRANCHES=()
+
+            while true; do
+              RESPONSE=$(gh api \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/$REPO/pulls?state=closed&per_page=100&page=$PAGE" 2>/dev/null)
+
+              BRANCHES=$(echo "$RESPONSE" | jq -r '.[] | select(.merged_at != null) | .head.ref')
+
+              if [ -z "$BRANCHES" ]; then
+                break
+              fi
+
+              while IFS= read -r branch; do
+                MERGED_BRANCHES+=("$branch")
+              done <<< "$BRANCHES"
+
+              COUNT=$(echo "$RESPONSE" | jq '. | length')
+              if [ "$COUNT" -lt 100 ]; then
+                break
+              fi
+
+              PAGE=$((PAGE + 1))
+            done
+
+            echo "  📦 Merged PR branches found (with duplicates): ${#MERGED_BRANCHES[@]}"
+
+            # Deduplicate
+            UNIQUE_BRANCHES=($(printf "%s\n" "${MERGED_BRANCHES[@]}" | sort -u))
+            echo "  📦 Unique branch names: ${#UNIQUE_BRANCHES[@]}"
+
+            # ── Check which branches still exist ────────────────────────────
+            STALE_LIST="[]"
+            STALE_COUNT=0
+
+            for BRANCH in "${UNIQUE_BRANCHES[@]}"; do
+              [ "$BRANCH" = "$DEFAULT_BRANCH" ] && continue
+
+              HTTP_STATUS=$(gh api \
+                -H "Accept: application/vnd.github+json" \
+                "/repos/$REPO/branches/$BRANCH" \
+                --silent \
+                -w "%{http_code}" \
+                -o /dev/null 2>/dev/null || echo "404")
+
+              if [ "$HTTP_STATUS" = "200" ]; then
+                echo "  🗑️  $BRANCH"
+
+                # Get last commit info for context
+                LAST_COMMIT=$(gh api \
+                  "/repos/$REPO/branches/$BRANCH" \
+                  --jq '{sha: .commit.sha[:7], date: .commit.commit.committer.date, author: .commit.commit.committer.name}' \
+                  2>/dev/null || echo '{}')
+
+                STALE_LIST=$(echo "$STALE_LIST" | jq \
+                  --arg name "$BRANCH" \
+                  --argjson commit "$LAST_COMMIT" \
+                  '. += [{"branch": $name, "last_commit": $commit}]')
+
+                STALE_COUNT=$((STALE_COUNT + 1))
+              fi
+            done
+
+            TOTAL_STALE=$((TOTAL_STALE + STALE_COUNT))
+            echo "  📊 Stale branches: $STALE_COUNT"
+
+            REPORT=$(echo "$REPORT" | jq \
+              --arg repo "$REPO" \
+              --arg default_branch "$DEFAULT_BRANCH" \
+              --argjson stale "$STALE_LIST" \
+              --argjson count "$STALE_COUNT" \
+              '. += [{
+                "repo": $repo,
+                "status": "ok",
+                "default_branch": $default_branch,
+                "stale_branch_count": $count,
+                "stale_branches": $stale
+              }]')
+          done
+
+          # ── Write report files ───────────────────────────────────────────────
+          mkdir -p audit-output
+
+          # Full JSON report
+          echo "$REPORT" | jq \
+            --arg date "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            --arg total "$TOTAL_STALE" \
+            '{
+              generated_at: $date,
+              total_stale_branches: ($total | tonumber),
+              repos: .
+            }' > audit-output/stale-branches-report.json
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Audit complete. Total stale branches across all repos: $TOTAL_STALE"
+
+      - name: Upload JSON report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-branches-report-${{ github.run_id }}
+          path: audit-output/stale-branches-report.json
+          retention-days: 30
+
+      - name: Write job summary
+        run: |
+          REPORT=$(cat audit-output/stale-branches-report.json)
+          DATE=$(echo "$REPORT" | jq -r '.generated_at')
+          TOTAL=$(echo "$REPORT" | jq -r '.total_stale_branches')
+
+          echo "## 🌿 Stale Branch Audit — $DATE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Total stale branches found: **$TOTAL**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "$REPORT" | jq -c '.repos[]' | while read -r repo_obj; do
+            REPO=$(echo "$repo_obj" | jq -r '.repo')
+            STATUS=$(echo "$repo_obj" | jq -r '.status')
+            COUNT=$(echo "$repo_obj" | jq -r '.stale_branch_count // 0')
+
+            if [ "$STATUS" = "error" ]; then
+              echo "### ⚠️ \`$REPO\` — access error" >> $GITHUB_STEP_SUMMARY
+            elif [ "$COUNT" -eq 0 ]; then
+              echo "### ✅ \`$REPO\` — no stale branches" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "### 🗑️ \`$REPO\` — $COUNT stale branch(es)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Branch | Last Author | Last Commit Date | SHA |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|-------------|------------------|-----|" >> $GITHUB_STEP_SUMMARY
+              echo "$repo_obj" | jq -c '.stale_branches[]' | while read -r b; do
+                NAME=$(echo "$b" | jq -r '.branch')
+                AUTHOR=$(echo "$b" | jq -r '.last_commit.author // "—"')
+                CDATE=$(echo "$b" | jq -r '.last_commit.date // "—"')
+                SHA=$(echo "$b" | jq -r '.last_commit.sha // "—"')
+                echo "| \`$NAME\` | $AUTHOR | $CDATE | \`$SHA\` |" >> $GITHUB_STEP_SUMMARY
+              done
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
